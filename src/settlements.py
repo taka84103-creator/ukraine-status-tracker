@@ -39,7 +39,11 @@ def fetch_settlements() -> list[dict]:
         response = requests.post(
             OVERPASS_API,
             data={"data": OVERPASS_QUERY},
-            timeout=180  # большой таймаут — запрос тяжёлый
+            timeout=180,
+            headers={
+                "User-Agent": "UkraineStatusTracker/1.0",
+                "Accept": "application/json"
+            }
         )
         response.raise_for_status()
         data = response.json()
