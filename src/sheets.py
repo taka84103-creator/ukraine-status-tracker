@@ -164,6 +164,8 @@ def update_settlements(spreadsheet: gspread.Spreadsheet, settlements: list[dict]
             s["place_type"],
             s["status"],
             now,
+            s["lat"],
+            s["lon"],
         ]
 
         if key in existing_map:
