@@ -35,54 +35,32 @@ def fetch_occupation_polygons() -> dict:
 
 
 def _fetch_from_deepstate() -> dict | None:
-    """Загрузка полигонов с DeepStateMap."""
+    """Завантаження полігонів з DeepStateMap."""
     try:
         response = requests.get(DEEPSTATE_URL, timeout=30)
         response.raise_for_status()
         data = response.json()
 
-                # ВРЕМЕННО: логируем структуру ответа для диагностики
-        logger.info(f"Тип ответа: {type(data)}")
+        # ДІАГНОСТИКА: друкуємо повну структуру відповіді
+        logger.info(f"HTTP статус: {response.status_code}")
+        logger.info(f"Тип даних: {type(data).__name__}")
+
         if isinstance(data, dict):
-            logger.info(f"Ключи верхнего уровня: {list(data.keys())}")
+            logger.info(f"Ключі: {list(data.keys())}")
+            # Друкуємо перший рівень кожного ключа
+            for key in list(data.keys())[:5]:
+                val = data[key]
+                logger.info(f"  [{key}] тип={type(val).__name__}, значення={str(val)[:200]}")
+
         elif isinstance(data, list):
-            logger.info(f"Список из {len(data)} элементов")
+            logger.info(f"Список з {len(data)} елементів")
             if data:
-                logger.info(f"Первый элемент: {str(data[0])[:500]}")
+                logger.info(f"Перший елемент: {str(data[0])[:300]}")
 
-        from shapely.geometry import shape
-        occupied = []
-        partial  = []
+        return {"occupied": [], "partial": [], "source": "DeepStateMap (діагностика)"}
 
-        # DeepStateMap возвращает GeoJSON FeatureCollection
-        for feature in data.get("features", []):
-            props  = feature.get("properties", {})
-            status = props.get("status", "").lower()
-            geom   = feature.get("geometry")
-
-            if not geom:
-                continue
-
-            try:
-                polygon = shape(geom)
-                if "occupied" in status and "partial" not in status:
-                    occupied.append(polygon)
-                elif "partial" in status or "contested" in status:
-                    partial.append(polygon)
-            except Exception:
-                continue  # пропускаем битую геометрию
-
-        logger.info(
-            f"DeepStateMap: {len(occupied)} оккупир. + {len(partial)} частичных"
-        )
-        return {
-            "occupied": occupied,
-            "partial":  partial,
-            "source":   "DeepStateMap"
-        }
-
-    except requests.RequestException as e:
-        logger.warning(f"DeepStateMap недоступен: {e}")
+    except Exception as e:
+        logger.error(f"Помилка DeepStateMap: {e}")
         return None
 
 
