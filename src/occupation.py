@@ -41,6 +41,15 @@ def _fetch_from_deepstate() -> dict | None:
         response.raise_for_status()
         data = response.json()
 
+                # ВРЕМЕННО: логируем структуру ответа для диагностики
+        logger.info(f"Тип ответа: {type(data)}")
+        if isinstance(data, dict):
+            logger.info(f"Ключи верхнего уровня: {list(data.keys())}")
+        elif isinstance(data, list):
+            logger.info(f"Список из {len(data)} элементов")
+            if data:
+                logger.info(f"Первый элемент: {str(data[0])[:500]}")
+
         from shapely.geometry import shape
         occupied = []
         partial  = []
