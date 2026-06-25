@@ -1,1 +1,410 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Статус населених пунктів України</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
 
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #f0f2f5;
+      color: #1a1a2e;
+    }
+
+    header {
+      background: #1a1a2e;
+      color: white;
+      padding: 18px 24px;
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+
+    header h1 { font-size: 1.2rem; font-weight: 600; }
+    header span { font-size: 1.5rem; }
+
+    .controls {
+      background: white;
+      padding: 16px 24px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      border-bottom: 1px solid #e0e0e0;
+      position: sticky;
+      top: 0;
+      z-index: 100;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.08);
+    }
+
+    .controls input, .controls select {
+      padding: 8px 12px;
+      border: 1px solid #ccc;
+      border-radius: 6px;
+      font-size: 0.9rem;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+
+    .controls input:focus, .controls select:focus {
+      border-color: #4a90d9;
+    }
+
+    #search {
+      flex: 1;
+      min-width: 200px;
+      font-size: 1rem;
+    }
+
+    .controls select { min-width: 150px; }
+
+    .stats {
+      padding: 10px 24px;
+      font-size: 0.85rem;
+      color: #666;
+      background: #f9f9f9;
+      border-bottom: 1px solid #eee;
+    }
+
+    .stats span { font-weight: 600; color: #333; }
+
+    .table-wrap {
+      overflow-x: auto;
+      padding: 16px 24px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: white;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.1);
+      font-size: 0.88rem;
+    }
+
+    thead tr {
+      background: #1a1a2e;
+      color: white;
+    }
+
+    thead th {
+      padding: 12px 14px;
+      text-align: left;
+      font-weight: 500;
+      white-space: nowrap;
+    }
+
+    tbody tr {
+      border-bottom: 1px solid #f0f0f0;
+      transition: background 0.15s;
+    }
+
+    tbody tr:hover { background: #f5f8ff; }
+
+    tbody td {
+      padding: 10px 14px;
+      vertical-align: middle;
+    }
+
+    /* Статуси */
+    .badge {
+      display: inline-block;
+      padding: 3px 10px;
+      border-radius: 12px;
+      font-size: 0.8rem;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .badge-free     { background: #d4f5d4; color: #1a7a1a; }
+    .badge-occupied { background: #fdd; color: #a00; }
+    .badge-partial  { background: #fff3cd; color: #7a5c00; }
+    .badge-unknown  { background: #eee; color: #666; }
+
+    /* Посилання на карту */
+    .map-link {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      color: #4a90d9;
+      text-decoration: none;
+      font-size: 0.82rem;
+      white-space: nowrap;
+    }
+
+    .map-link:hover { text-decoration: underline; }
+
+    /* Завантаження */
+    #loading {
+      text-align: center;
+      padding: 60px;
+      color: #888;
+      font-size: 1rem;
+    }
+
+    .spinner {
+      width: 36px; height: 36px;
+      border: 4px solid #e0e0e0;
+      border-top-color: #4a90d9;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+      margin: 0 auto 16px;
+    }
+
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    #no-results {
+      text-align: center;
+      padding: 40px;
+      color: #aaa;
+      display: none;
+    }
+
+    .update-time {
+      font-size: 0.78rem;
+      color: #aaa;
+      margin-left: auto;
+      align-self: center;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <span>🇺🇦</span>
+  <h1>Статус населених пунктів України</h1>
+  <div class="update-time" id="updateTime"></div>
+</header>
+
+<div class="controls">
+  <input type="text" id="search" placeholder="🔍 Пошук за назвою населеного пункту..." oninput="filterTable()">
+  <select id="filterRegion" onchange="filterTable()">
+    <option value="">Всі області</option>
+  </select>
+  <select id="filterDistrict" onchange="filterTable()">
+    <option value="">Всі райони</option>
+  </select>
+  <select id="filterType" onchange="filterTable()">
+    <option value="">Всі типи</option>
+  </select>
+  <select id="filterStatus" onchange="filterTable()">
+    <option value="">Всі статуси</option>
+    <option value="Вільний">🟢 Вільний</option>
+    <option value="Окупований">🔴 Окупований</option>
+    <option value="Частково окупований">🟡 Частково окупований</option>
+    <option value="Не вдалося визначити">⚪ Не визначено</option>
+  </select>
+</div>
+
+<div class="stats" id="stats">Завантаження даних...</div>
+
+<div id="loading">
+  <div class="spinner"></div>
+  Завантаження даних з таблиці...
+</div>
+
+<div class="table-wrap" id="tableWrap" style="display:none">
+  <table>
+    <thead>
+      <tr>
+        <th>Область</th>
+        <th>Район</th>
+        <th>Населений пункт</th>
+        <th>Тип</th>
+        <th>Статус</th>
+        <th>Дата оновлення</th>
+        <th>На карті</th>
+      </tr>
+    </thead>
+    <tbody id="tableBody"></tbody>
+  </table>
+  <div id="no-results">😕 Нічого не знайдено. Спробуйте змінити фільтри.</div>
+</div>
+
+<script>
+  // ============================
+  // НАЛАШТУВАННЯ — замініть ID
+  // ============================
+  const SPREADSHEET_ID = '1GNRQ58XiEmcDRMv6nDfhNHIoE9mmRCkrj7azMU5YJjQ';
+  const SHEET_NAME     = 'Населені пункти';
+  // ============================
+
+  let allRows = [];
+
+  // Індекси стовпців у таблиці (0-based)
+  const COL = {
+    region:   0,
+    district: 1,
+    name:     2,
+    type:     3,
+    status:   4,
+    date:     5,
+    lat:      6,  // якщо є координати
+    lon:      7,
+  };
+
+  async function loadData() {
+    const url = `https://docs.google.com/spreadsheets/d/${SPREADSHEET_ID}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(SHEET_NAME)}`;
+
+    try {
+      const res  = await fetch(url);
+      const text = await res.text();
+
+      // Google повертає не чистий JSON — прибираємо обгортку
+      const json = JSON.parse(text.match(/google\.visualization\.Query\.setResponse\(([\s\S]*)\)/)[1]);
+      const rows = json.table.rows;
+
+      allRows = rows.map(r => r.c.map(cell => cell ? (cell.v ?? cell.f ?? '') : ''));
+
+      // Прибираємо рядок заголовка якщо він потрапив у дані
+      if (allRows[0] && allRows[0][0] === 'Область') {
+        allRows.shift();
+      }
+
+      populateFilters();
+      renderTable(allRows);
+      document.getElementById('loading').style.display    = 'none';
+      document.getElementById('tableWrap').style.display  = 'block';
+
+      // Показуємо дату останнього оновлення
+      if (allRows[0] && allRows[0][COL.date]) {
+        document.getElementById('updateTime').textContent =
+          'Оновлено: ' + allRows[0][COL.date];
+      }
+
+    } catch (e) {
+      document.getElementById('loading').innerHTML =
+        '❌ Помилка завантаження даних.<br>Перевірте що таблиця відкрита для перегляду.';
+      console.error(e);
+    }
+  }
+
+  function populateFilters() {
+    const regions   = [...new Set(allRows.map(r => r[COL.region]).filter(Boolean))].sort();
+    const types     = [...new Set(allRows.map(r => r[COL.type]).filter(Boolean))].sort();
+
+    fillSelect('filterRegion',   regions,  'Всі області');
+    fillSelect('filterType',     types,    'Всі типи');
+  }
+
+  function fillSelect(id, values, placeholder) {
+    const sel = document.getElementById(id);
+    sel.innerHTML = `<option value="">${placeholder}</option>`;
+    values.forEach(v => {
+      const opt = document.createElement('option');
+      opt.value = v;
+      opt.textContent = v;
+      sel.appendChild(opt);
+    });
+  }
+
+  function updateDistrictFilter(selectedRegion) {
+    const districts = [...new Set(
+      allRows
+        .filter(r => !selectedRegion || r[COL.region] === selectedRegion)
+        .map(r => r[COL.district])
+        .filter(Boolean)
+    )].sort();
+    fillSelect('filterDistrict', districts, 'Всі райони');
+  }
+
+  document.getElementById('filterRegion').addEventListener('change', function() {
+    updateDistrictFilter(this.value);
+    filterTable();
+  });
+
+  function filterTable() {
+    const search   = document.getElementById('search').value.toLowerCase().trim();
+    const region   = document.getElementById('filterRegion').value;
+    const district = document.getElementById('filterDistrict').value;
+    const type     = document.getElementById('filterType').value;
+    const status   = document.getElementById('filterStatus').value;
+
+    const filtered = allRows.filter(r => {
+      if (search   && !r[COL.name].toLowerCase().includes(search))     return false;
+      if (region   && r[COL.region]   !== region)                      return false;
+      if (district && r[COL.district] !== district)                    return false;
+      if (type     && r[COL.type]     !== type)                        return false;
+      if (status   && r[COL.status]   !== status)                      return false;
+      return true;
+    });
+
+    renderTable(filtered);
+  }
+
+  function renderTable(rows) {
+    const tbody = document.getElementById('tableBody');
+    const noRes = document.getElementById('no-results');
+
+    if (rows.length === 0) {
+      tbody.innerHTML = '';
+      noRes.style.display = 'block';
+      updateStats(0);
+      return;
+    }
+
+    noRes.style.display = 'none';
+
+    // Рендеримо максимум 2000 рядків для швидкості
+    const visible = rows.slice(0, 2000);
+
+    tbody.innerHTML = visible.map(r => {
+      const name     = r[COL.name]     || '';
+      const region   = r[COL.region]   || '';
+      const district = r[COL.district] || '';
+      const type     = r[COL.type]     || '';
+      const status   = r[COL.status]   || '';
+      const date     = r[COL.date]     || '';
+      const lat      = r[COL.lat]      || '';
+      const lon      = r[COL.lon]      || '';
+
+      const badge = getBadge(status);
+
+      // Посилання на Google Maps
+      let mapLink = '';
+      if (lat && lon && lat !== '' && lon !== '') {
+        const mapsUrl = `https://www.google.com/maps?q=${lat},${lon}&z=14&t=m`;
+        mapLink = `<a class="map-link" href="${mapsUrl}" target="_blank">🗺 ${name}</a>`;
+      } else {
+        const query   = encodeURIComponent(`${name}, Україна`);
+        const mapsUrl = `https://maps.google.com/?q=${query}`;
+        mapLink = `<a class="map-link" href="${mapsUrl}" target="_blank">🗺 ${name}</a>`;
+      }
+
+      return `<tr>
+        <td>${region}</td>
+        <td>${district}</td>
+        <td><strong>${name}</strong></td>
+        <td>${type}</td>
+        <td>${badge}</td>
+        <td style="text-align:right;color:#888;font-size:0.82rem">${date}</td>
+        <td>${mapLink}</td>
+      </tr>`;
+    }).join('');
+
+    updateStats(rows.length);
+  }
+
+  function getBadge(status) {
+    const map = {
+      'Вільний':               '<span class="badge badge-free">🟢 Вільний</span>',
+      'Окупований':            '<span class="badge badge-occupied">🔴 Окупований</span>',
+      'Частково окупований':   '<span class="badge badge-partial">🟡 Частково окупований</span>',
+      'Не вдалося визначити':  '<span class="badge badge-unknown">⚪ Не визначено</span>',
+    };
+    return map[status] || `<span class="badge badge-unknown">${status}</span>`;
+  }
+
+  function updateStats(count) {
+    const total = allRows.length;
+    document.getElementById('stats').innerHTML =
+      `Показано: <span>${count.toLocaleString('uk')}</span> з <span>${total.toLocaleString('uk')}</span> населених пунктів`;
+  }
+
+  loadData();
+</script>
+</body>
+</html>
