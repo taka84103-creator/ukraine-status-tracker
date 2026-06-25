@@ -1,217 +1,116 @@
-import requests
+import json
 import logging
+import os
 from config import STATUS_UNKNOWN
 
 logger = logging.getLogger(__name__)
 
-# Офіційний реєстр КОАТУУ з data.gov.ua
-KOATUU_URL = (
-    "https://data.gov.ua/en/dataset/dc081fb0-f504-4696-916c-a5b24312ab6e"
-    "/resource/296adb7a-476a-40c8-9de6-211327cb3aa1/download/koatuu.json"
-)
+# Шлях до файлу в репозиторії
+KOATUU_FILE = os.path.join(os.path.dirname(__file__), "..", "data", "koatuu.json")
 
-# Резервне джерело — Overpass API
-OVERPASS_API  = "https://overpass-api.de/api/interpreter"
-OVERPASS_QUERY = """
-[out:json][timeout:120];
-area["name"="Україна"]["admin_level"="2"]->.ukraine;
-(
-  node["place"~"city|town|village|hamlet|suburb|urban_village"]
-     (area.ukraine);
-);
-out body;
-"""
-
-# Коди категорій КОАТУУ
-# Перший символ коду рівня 3 визначає тип
+# Мапінг категорій → тип населеного пункту
 KOATUU_TYPE_MAP = {
-    "М": "Місто",
-    "Т": "Селище міського типу",
-    "С": "Село",
-    "Х": "Хутір",
-    "С/Р": "Селище",
-}
-
-PLACE_TYPE_MAP = {
-    "city":          "Місто",
-    "town":          "Місто",
-    "village":       "Село",
-    "hamlet":        "Хутір",
-    "suburb":        "Селище",
-    "urban_village": "Селище міського типу",
+    "М":   "Місто",
+    "Т":   "Селище міського типу",
+    "С":   "Село",
+    "Х":   "Хутір",
+    "СМТ": "Селище міського типу",
+    "СЩ":  "Селище",
 }
 
 
 def fetch_settlements() -> list[dict]:
     """
-    Завантажує офіційний список населених пунктів з КОАТУУ.
-    При помилці — використовує Overpass API як резерв.
-    """
-    settlements = _fetch_from_koatuu()
-    if settlements:
-        logger.info(f"Використано КОАТУУ: {len(settlements)} унікальних пунктів")
-        return settlements
-
-    logger.warning("КОАТУУ недоступний, використовуємо Overpass API...")
-    return _fetch_from_overpass()
-
-
-def _fetch_from_koatuu() -> list[dict]:
-    """
-    Завантажує дані з офіційного реєстру КОАТУУ.
-    Структура: [{Код, Назва, Категорія}, ...]
-    Код: 10 цифр, де перші 2 — область, 4 — район, решта — пункт
+    Читає koatuu.json з репозиторію та повертає список населених пунктів.
+    Структура файлу:
+      Перший рівень  — область
+      Другий рівень  — район/група
+      Третій рівень  — рада/громада
+      Четвертий рівень — населений пункт
+    Населені пункти — це рядки де заповнений Четвертий рівень і є Категорія.
     """
     try:
-        response = requests.get(KOATUU_URL, timeout=60)
-        response.raise_for_status()
-        data = response.json()
+        with open(KOATUU_FILE, encoding="utf-8") as f:
+            data = json.load(f)
 
+        logger.info(f"Файл koatuu.json завантажено: {len(data)} записів")
+
+        # Збираємо назви областей за кодом першого рівня
+        regions = {}
+        for item in data:
+            first  = item.get("Перший рівень", "").strip()
+            second = item.get("Другий рівень", "").strip()
+            third  = item.get("Третій рівень", "").strip()
+            fourth = item.get("Четвертий рівень", "").strip()
+            name   = item.get("Назва об'єкта українською мовою", "").strip()
+            cat    = item.get("Категорія", "").strip()
+
+            # Область: є тільки перший рівень, решта порожні, немає категорії
+            if first and not second and not third and not fourth and not cat:
+                regions[first] = _normalize_region(name)
+
+        logger.info(f"Знайдено областей: {len(regions)}")
+
+        # Збираємо населені пункти — рядки з заповненим четвертим рівнем і категорією
         settlements = []
-        regions     = {}   # код_2 → назва області
-        districts   = {}   # код_4 → назва району
-
-        # Перший прохід — збираємо області і райони
-        for item in data:
-            code = str(item.get("Код", "")).strip()
-            name = str(item.get("Назва", "")).strip()
-            cat  = str(item.get("Категорія", "")).strip()
-
-            if not code or not name:
-                continue
-
-            # Область: код закінчується на 00000000 (8 нулів)
-            if code.endswith("00000000"):
-                regions[code[:2]] = _normalize_region(name)
-
-            # Район: код закінчується на 000000 (6 нулів) але не область
-            elif code.endswith("000000") and not code.endswith("00000000"):
-                districts[code[:4]] = name
-
-        # Другий прохід — збираємо населені пункти
-        seen_names = set()
+        seen = set()
 
         for item in data:
-            code = str(item.get("Код", "")).strip()
-            name = str(item.get("Назва", "")).strip()
-            cat  = str(item.get("Категорія", "")).strip()
+            first  = item.get("Перший рівень", "").strip()
+            second = item.get("Другий рівень", "").strip()
+            third  = item.get("Третій рівень", "").strip()
+            fourth = item.get("Четвертий рівень", "").strip()
+            name   = item.get("Назва об'єкта українською мовою", "").strip()
+            cat    = item.get("Категорія", "").strip()
 
-            if not code or not name:
+            # Населений пункт: є четвертий рівень і категорія
+            if not fourth or not cat:
                 continue
 
-            # Населені пункти: не закінчуються на 000000
-            if code.endswith("000000"):
+            # Пропускаємо службові записи без реальної назви
+            if not name or name.startswith("СЕЛО ") and len(name) < 6:
                 continue
 
-            # Визначаємо тип за категорією
-            place_type = KOATUU_TYPE_MAP.get(cat, "Інший")
+            place_type = KOATUU_TYPE_MAP.get(cat.upper(), "Інший")
+            region     = regions.get(first, "")
 
-            # Визначаємо область і район за кодом
-            region_key   = code[:2]
-            district_key = code[:4]
-            region   = regions.get(region_key, "")
-            district = districts.get(district_key, "")
-
-            # Унікальний ключ: назва + область (є однакові назви в різних областях)
-            unique_key = f"{name.lower()}|{region}"
-            if unique_key in seen_names:
+            # Унікальний ключ щоб уникнути дублікатів
+            key = f"{fourth}|{name.lower()}"
+            if key in seen:
                 continue
-            seen_names.add(unique_key)
+            seen.add(key)
 
             settlements.append({
-                "name":       name,
+                "name":       _title_case(name),
                 "region":     region,
-                "district":   district,
+                "district":   "",   # район визначимо окремо якщо потрібно
                 "place_type": place_type,
-                "lat":        0,   # КОАТУУ не містить координат
+                "lat":        0,
                 "lon":        0,
                 "status":     STATUS_UNKNOWN,
             })
 
-        logger.info(f"КОАТУУ: завантажено {len(settlements)} населених пунктів")
+        logger.info(f"Населених пунктів після обробки: {len(settlements)}")
         return settlements
 
-    except Exception as e:
-        logger.error(f"Помилка завантаження КОАТУУ: {e}")
+    except FileNotFoundError:
+        logger.error(f"Файл не знайдено: {KOATUU_FILE}")
+        logger.error("Покладіть koatuu.json у папку data/ репозиторію")
         return []
-
-
-def _fetch_from_overpass() -> list[dict]:
-    """Резервне джерело — OpenStreetMap Overpass API."""
-    try:
-        response = requests.post(
-            OVERPASS_API,
-            data={"data": OVERPASS_QUERY},
-            timeout=180,
-            headers={
-                "User-Agent": "UkraineStatusTracker/1.0",
-                "Accept":     "application/json"
-            }
-        )
-        response.raise_for_status()
-        data     = response.json()
-        elements = data.get("elements", [])
-
-        settlements = []
-        seen_ids    = set()
-        seen_coords = set()
-
-        for element in elements:
-            osm_id = element.get("id")
-            if osm_id in seen_ids:
-                continue
-            seen_ids.add(osm_id)
-
-            tags = element.get("tags", {})
-            name = (
-                tags.get("name:uk") or
-                tags.get("name") or
-                tags.get("name:ru")
-            )
-            if not name:
-                continue
-
-            lat = round(float(element.get("lat", 0)), 4)
-            lon = round(float(element.get("lon", 0)), 4)
-
-            coord_key = (name.lower(), lat, lon)
-            if coord_key in seen_coords:
-                continue
-            seen_coords.add(coord_key)
-
-            place_type = PLACE_TYPE_MAP.get(tags.get("place", ""), "Інший")
-            region     = _get_osm_region(tags)
-            district   = tags.get("addr:district") or tags.get("is_in:district") or ""
-
-            settlements.append({
-                "name":       name,
-                "region":     region,
-                "district":   district,
-                "place_type": place_type,
-                "lat":        lat,
-                "lon":        lon,
-                "status":     STATUS_UNKNOWN,
-            })
-
-        logger.info(f"Overpass: {len(settlements)} населених пунктів після дедублікації")
-        return settlements
-
     except Exception as e:
-        logger.error(f"Помилка Overpass API: {e}")
+        logger.error(f"Помилка читання koatuu.json: {e}")
         return []
 
 
 def _normalize_region(name: str) -> str:
-    """Приводить назву області до єдиного формату."""
-    name = name.replace(" ОБЛАСТЬ", "").replace(" область", "").strip()
-    name = name.capitalize()
-    return f"{name} область"
+    """ВОЛИНСЬКА ОБЛАСТЬ → Волинська область"""
+    name = name.strip()
+    # Прибираємо зайві слова типу "М.СІМФЕРОПОЛЬ" після слешу
+    if "/" in name:
+        name = name.split("/")[0].strip()
+    return name.title()
 
 
-def _get_osm_region(tags: dict) -> str:
-    region = (
-        tags.get("addr:region") or
-        tags.get("is_in:region") or ""
-    )
-    region = region.replace(" область", "").replace(" обл.", "").strip()
-    return f"{region} область" if region else ""
+def _title_case(name: str) -> str:
+    """ЗЕЛЕНИЙ ГАЙ → Зелений Гай"""
+    return name.title()
