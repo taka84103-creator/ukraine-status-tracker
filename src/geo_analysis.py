@@ -6,16 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 def determine_status(lat: float, lon: float, polygons: dict) -> str:
-    """
-    Определяет статус населённого пункта по его координатам.
-
-    Алгоритм:
-    1. Создаём точку из координат
-    2. Проверяем — попадает ли точка в полигон оккупированных территорий
-    3. Если нет — проверяем частично оккупированные
-    4. Если нет — статус "Свободен"
-    """
-    if not lat or not lon:
+    if not lat or not lon or lat == 0 or lon == 0:
         return STATUS_UNKNOWN
 
     point = Point(lon, lat)  # Shapely: сначала долгота, потом широта
